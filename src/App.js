@@ -148,7 +148,7 @@ function App() {
         <span style={{ color: '#9C9EA4' }}>as</span>
         <span style={{ fontWeight: 'bold', color: '#3F19D9' }}>T</span>
       </h1>      <button onClick={calculateAdjustmentPrediction} disabled={isLoading}>
-        {isLoading ? 'Refreshing...' : 'Refresh Forecast'}
+        {isLoading ? 'Refreshing...' : 'Refresh'}
       </button>
       <pre>{forecastResults}</pre>
     </div>
