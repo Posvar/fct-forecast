@@ -1,5 +1,7 @@
+/* eslint-disable no-undef */
 import React, { useState, useEffect } from 'react';
 import { ethers } from 'ethers';
+import { Loader2 } from 'lucide-react';
 
 const API_URL_BLOCKS = 'https://explorer.facet.org/api/v2/main-page/blocks';
 const CONTRACT_ADDRESS = '0x4200000000000000000000000000000000000015';
@@ -26,8 +28,9 @@ const ABI = [
 ];
 
 function App() {
-  const [forecastResults, setForecastResults] = useState('');
+  const [data, setData] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState(null);
 
   const calculateTargetFCT = (blockHeight) => {
     const halvingPeriod = Math.floor(blockHeight / BLOCKS_PER_HALVING);
@@ -50,8 +53,7 @@ function App() {
     const fctMintRate = await contract.fctMintRate();
 
     const fctMintRateGwei = ethers.formatUnits(fctMintRate, 'gwei');
-    // eslint-disable-next-line no-undef
-    const fctMined = fctMintPeriodL1DataGas * BigInt(Math.floor(parseFloat(fctMintRateGwei) * 1e9));
+    const fctMined = fctMintPeriodL1DataGas * BigInt(Math.floor(Number(fctMintRateGwei) * 1e9));
     const fctMinedEther = parseFloat(ethers.formatEther(fctMined));
 
     return {
@@ -63,16 +65,11 @@ function App() {
   const calculateAdjustmentPrediction = async () => {
     try {
       setIsLoading(true);
-      let output = 'Fetching latest block height...\n';
+      setError(null);
+      
       const totalBlocks = await fetchLatestBlockHeight();
-
-      const halvingPeriod = Math.floor(totalBlocks / BLOCKS_PER_HALVING);
       const targetFCT = calculateTargetFCT(totalBlocks);
-      output += `Current Target FCT: ${targetFCT.toLocaleString()} (after ${halvingPeriod} halvings)\n`;
-
-      output += 'Fetching contract data...\n';
       const contractData = await fetchContractData();
-
       const { fctMintedSoFar, currentMintRate } = contractData;
 
       // Calculate current adjustment period
@@ -93,43 +90,36 @@ function App() {
       // Apply bounds
       const upperBound = Math.min(MAX_MINT_RATE, currentMintRate * 2);
       const lowerBound = Math.round(currentMintRate * 0.5);
-
-      if (forecastedMintRate > upperBound) {
-        forecastedMintRate = upperBound;
-      } else if (forecastedMintRate < lowerBound) {
-        forecastedMintRate = lowerBound;
-      }
+      forecastedMintRate = Math.min(Math.max(forecastedMintRate, lowerBound), upperBound);
 
       const changeInMintRatePercent = ((forecastedMintRate - currentMintRate) / currentMintRate) * 100;
+      const halvingPeriod = Math.floor(totalBlocks / BLOCKS_PER_HALVING);
 
-      // Output results
-      output += '\nAdjustment Period Stats:\n';
-      output += `- Current block height: ${totalBlocks.toLocaleString()}\n`;
-      output += `- Halvings occurred: ${halvingPeriod}\n`;
-      output += `- Current Target FCT: ${targetFCT.toLocaleString()}\n`;
-      output += `- Current mint rate: ${currentMintRate.toLocaleString()} (gwei)\n`;
-      output += `- Current adjustment period: ${currentPeriod}\n`;
-      output += `- Period start block: ${periodStartBlock.toLocaleString()}\n`;
-      output += `- Period end block: ${periodEndBlock.toLocaleString()}\n`;
-      output += `- Blocks elapsed in period: ${blocksElapsedInPeriod.toLocaleString()}\n`;
-      output += `- Blocks remaining in period: ${blocksRemaining.toLocaleString()}\n`;
-      output += `- Percent complete: ${percentComplete.toFixed(1)}%\n`;
-      output += `- Total FCT mined: ${fctMintedSoFar.toLocaleString()} (${((fctMintedSoFar / targetFCT) * 100).toFixed(1)}% of Target)\n`;
-
-      output += '\nPrediction:\n';
-      output += `- Forecasted issuance: ${forecastedIssuance.toLocaleString()} FCT\n`;
-      if (forecastedIssuance > targetFCT) {
-        output += `- Over target by ${(forecastedIssuance - targetFCT).toLocaleString()} FCT\n`;
-      } else {
-        output += `- Under target by ${(targetFCT - forecastedIssuance).toLocaleString()} FCT\n`;
-      }
-      output += `- Forecasted change in mint rate: ${changeInMintRatePercent.toFixed(1)}%\n`;
-      output += `- Forecasted new mint rate: ${forecastedMintRate.toLocaleString()} (gwei)\n`;
-
-      setForecastResults(output);
+      setData({
+        adjustmentPeriod: {
+          period: currentPeriod,
+          targetFCT,
+          halvingPeriod,
+          periodStartBlock,
+          periodEndBlock,
+          currentBlockHeight: totalBlocks,
+          blocksElapsed: blocksElapsedInPeriod,
+          blocksRemaining,
+          percentComplete,
+          issuanceRate: currentMintRate,
+          totalFCTIssued: fctMintedSoFar,
+          percentOfTarget: ((fctMintedSoFar / targetFCT) * 100).toFixed(1)
+        },
+        prediction: {
+          forecastedIssuance,
+          targetDifference: targetFCT - forecastedIssuance,
+          changeInMintRate: changeInMintRatePercent.toFixed(1),
+          newMintRate: forecastedMintRate
+        }
+      });
     } catch (error) {
       console.error('Error in calculateAdjustmentPrediction:', error);
-      setForecastResults('Error calculating adjustment prediction: ' + error.message);
+      setError('Failed to fetch data. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -147,10 +137,63 @@ function App() {
         <span style={{ fontWeight: 'bold', color: '#3F19D9' }}>C</span>
         <span style={{ color: '#9C9EA4' }}>as</span>
         <span style={{ fontWeight: 'bold', color: '#3F19D9' }}>T</span>
-      </h1>      <button onClick={calculateAdjustmentPrediction} disabled={isLoading}>
-        {isLoading ? 'Refreshing...' : 'Refresh'}
+      </h1>
+      
+      <button onClick={calculateAdjustmentPrediction} disabled={isLoading}>
+        {isLoading ? (
+          <span className="flex items-center gap-2">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Refreshing...
+          </span>
+        ) : (
+          'Refresh'
+        )}
       </button>
-      <pre>{forecastResults}</pre>
+
+      {error && (
+        <div className="text-red-500 mt-4">{error}</div>
+      )}
+
+      {isLoading && !data && (
+        <div className="flex justify-center items-center mt-8">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      )}
+
+      {data && !isLoading && (
+        <div className="mt-6 text-left">
+          <div className="mb-6">
+            <h2 className="text-xl font-semibold mb-3">Adjustment Period Stats:</h2>
+            <ul className="space-y-2">
+              <li>Adjustment period: {data.adjustmentPeriod.period}</li>
+              <li>Target FCT issuance: {data.adjustmentPeriod.targetFCT.toLocaleString()} (after {data.adjustmentPeriod.halvingPeriod} halvings)</li>
+              <li>Period start block: {data.adjustmentPeriod.periodStartBlock.toLocaleString()}</li>
+              <li>Period end block: {data.adjustmentPeriod.periodEndBlock.toLocaleString()}</li>
+              <li>Current block height: {data.adjustmentPeriod.currentBlockHeight.toLocaleString()}
+                <ul className="ml-6 mt-1">
+                  <li>Blocks elapsed in period: {data.adjustmentPeriod.blocksElapsed.toLocaleString()} ({data.adjustmentPeriod.percentComplete.toFixed(1)}%)</li>
+                  <li>Blocks remaining in period: {data.adjustmentPeriod.blocksRemaining.toLocaleString()} ({(100 - data.adjustmentPeriod.percentComplete).toFixed(1)}%)</li>
+                </ul>
+              </li>
+              <li>Issuance rate: {data.adjustmentPeriod.issuanceRate.toLocaleString()} (gwei)</li>
+              <li>Total FCT issued: {data.adjustmentPeriod.totalFCTIssued.toLocaleString()} ({data.adjustmentPeriod.percentOfTarget}% of Target)</li>
+            </ul>
+          </div>
+
+          <div>
+            <h2 className="text-xl font-semibold mb-3">Prediction:</h2>
+            <ul className="space-y-2">
+              <li>Forecasted issuance in current period: {data.prediction.forecastedIssuance.toLocaleString()} FCT
+                <ul className="ml-6 mt-1">
+                  <li>Under target by {data.prediction.targetDifference.toLocaleString()} FCT</li>
+                </ul>
+              </li>
+              <li>Forecasted change in mint rate: {data.prediction.changeInMintRate}%</li>
+              <li>Forecasted new mint rate: {data.prediction.newMintRate.toLocaleString()} (gwei)</li>
+            </ul>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
